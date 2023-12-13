@@ -5063,7 +5063,7 @@ class TensorNetwork(object):
     def replace_with_svd(self, where, left_inds, eps, *, which='any',
                          right_inds=None, method='isvd', max_bond=None,
                          absorb='both', cutoff_mode='rel', renorm=None,
-                         ltags=None, rtags=None, keep_tags=True,
+                         ltags=None, rtags=None, keep_tags=True, bond_ind=None,
                          start=None, stop=None, inplace=False):
         r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
@@ -5106,6 +5106,8 @@ class TensorNetwork(object):
         keep_tags : bool, optional
             Whether to propagate tags found in the subnetwork to both new
             tensors or drop them, defaults to ``True``.
+        bond_ind : str, optional
+            Explicitly name the new bond, else a random one will be generated.
         start : int, optional
             If given, assume can use ``TNLinearOperator1D``.
         stop :  int, optional
@@ -5123,7 +5125,6 @@ class TensorNetwork(object):
         """
         leave, svd_section = self.partition(where, which=which,
                                             inplace=inplace)
-
         tags = svd_section.tags if keep_tags else oset()
         ltags = tags_to_oset(ltags)
         rtags = tags_to_oset(rtags)
@@ -5154,7 +5155,7 @@ class TensorNetwork(object):
         TL, TR = tensor_split(A, left_inds=left_inds, right_inds=right_inds,
                               method=method, cutoff=eps, absorb=absorb,
                               max_bond=max_bond, cutoff_mode=cutoff_mode,
-                              renorm=renorm, ltags=ltags, rtags=rtags)
+                              renorm=renorm, ltags=ltags, rtags=rtags, bond_ind=bond_ind)
 
         leave |= TL
         leave |= TR
