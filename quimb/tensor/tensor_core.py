@@ -383,6 +383,7 @@ def tensor_split(
     stags=None,
     bond_ind=None,
     right_inds=None,
+    return_s=False
 ):
     """Decompose this tensor into two tensors.
 
@@ -514,7 +515,9 @@ def tensor_split(
         method, cutoff, absorb, max_bond, cutoff_mode, renorm)
 
     # ``s`` itself will be None unless ``absorb=None`` is specified
+    # NOTE: we changed this part to always return ``s`` even if ``absorb=None``
     left, s, right = _SPLIT_FNS[method](array, **opts)
+
     if len(left_dims) != 1:
         left = do("reshape", left, (*left_dims, -1))
     if len(right_dims) != 1:
@@ -547,8 +550,13 @@ def tensor_split(
         Tr.modify(left_inds=right_inds)
 
     if get == 'tensors':
-        return tensors
+        if return_s:
+            return tensors, s
+        else:
+            return tensors
 
+    if return_s:
+        return TensorNetwork(tensors, virtual=True), s
     return TensorNetwork(tensors, virtual=True)
 
 
@@ -629,6 +637,7 @@ def tensor_compress_bond(
     gauges=None,
     gauge_smudge=1e-6,
     info=None,
+    return_s=False,
     **compress_opts
 ):
     r"""Inplace compress between the two single tensors. It follows the
@@ -687,13 +696,19 @@ def tensor_compress_bond(
         # b) -> c)
         M = T1_R @ T2_L
         # c) -> d)
-        M_L, *s, M_R = M.split(
-            left_inds=T1_L.bonds(M), bond_ind=bix,
-            get='tensors', absorb=absorb, **compress_opts)
+        if return_s:
+            (M_L, M_R), s = M.split(
+                left_inds=T1_L.bonds(M), bond_ind=bix,
+                get='tensors', absorb=absorb, return_s=True, **compress_opts)
+        else:
+            M_L, *s, M_R = M.split(
+                left_inds=T1_L.bonds(M), bond_ind=bix,
+                get='tensors', absorb=absorb, **compress_opts)
 
         # d) -> e)
         T1C = T1_L.contract(M_L, output_inds=T1.inds)
         T2C = M_R.contract(T2_R, output_inds=T2.inds)
+        V = T1C.data.reshape(2, -2)
 
     elif reduced == 'lazy':
         compress_opts.setdefault('method', 'isvd')
@@ -718,8 +733,9 @@ def tensor_compress_bond(
     elif absorb == 'left':
         T2.modify(left_inds=rix)
 
-    if s and info is not None:
-        info['singular_values'] = s[0].data
+    if not return_s:
+        if s and info is not None:
+            info['singular_values'] = s[0].data
 
     if gauges is not None:
         tn.gauge_simple_remove(outer=outer)
@@ -730,6 +746,9 @@ def tensor_compress_bond(
         fact_1_2 = fact**0.5
         T1 *= fact_1_2
         T2 *= fact_1_2
+
+    if return_s:
+        return s
 
 
 def tensor_balance_bond(t1, t2, smudge=1e-6):
@@ -5064,7 +5083,7 @@ class TensorNetwork(object):
                          right_inds=None, method='isvd', max_bond=None,
                          absorb='both', cutoff_mode='rel', renorm=None,
                          ltags=None, rtags=None, keep_tags=True, bond_ind=None,
-                         start=None, stop=None, inplace=False):
+                         start=None, stop=None, inplace=False, return_s=False):
         r"""Replace all tensors marked by ``where`` with an iteratively
         constructed SVD. E.g. if ``X`` denote ``where`` tensors::
 
@@ -5152,14 +5171,19 @@ class TensorNetwork(object):
         ltags = tags | ltags
         rtags = tags | rtags
 
-        TL, TR = tensor_split(A, left_inds=left_inds, right_inds=right_inds,
+        res = tensor_split(A, left_inds=left_inds, right_inds=right_inds,
                               method=method, cutoff=eps, absorb=absorb,
-                              max_bond=max_bond, cutoff_mode=cutoff_mode,
-                              renorm=renorm, ltags=ltags, rtags=rtags, bond_ind=bond_ind)
+                              max_bond=max_bond, cutoff_mode=cutoff_mode, 
+                              renorm=renorm, ltags=ltags, rtags=rtags, bond_ind=bond_ind, return_s=return_s)
+        if return_s:
+            (TL, TR), s = res
+        else:
+            TL, TR = res
 
         leave |= TL
         leave |= TR
-
+        if return_s:
+            return leave, s
         return leave
 
     replace_with_svd_ = functools.partialmethod(replace_with_svd, inplace=True)
@@ -5613,6 +5637,7 @@ class TensorNetwork(object):
         gauges=None,
         gauge_smudge=1e-6,
         callback=None,
+        return_s=False,
         **compress_opts
     ):
         ta = self.tensor_map[tid1]
@@ -5684,9 +5709,14 @@ class TensorNetwork(object):
             )
 
         if mode == 'basic':
-            tensor_compress_bond(
-                ta, tb, **compress_opts
-            )
+            if return_s:
+                s = tensor_compress_bond(
+                    ta, tb, return_s=True, **compress_opts
+                )
+            else:
+                tensor_compress_bond(
+                    ta, tb, **compress_opts
+                )
         elif mode == 'virtual-tree':
             self._compress_between_virtual_tree_tids(
                 tid1, tid2, **compress_opts
@@ -5722,6 +5752,9 @@ class TensorNetwork(object):
         if callback is not None:
             callback(self, (tid1, tid2))
 
+        if return_s:
+            return s
+        
     def compress_between(
         self,
         tags1,
@@ -5732,6 +5765,7 @@ class TensorNetwork(object):
         canonize_distance=0,
         canonize_opts=None,
         equalize_norms=False,
+        return_s=False,
         **compress_opts,
     ):
         r"""Compress the bond between the two single tensors in this network
@@ -5781,7 +5815,7 @@ class TensorNetwork(object):
         tid1, = self._get_tids_from_tags(tags1, which='all')
         tid2, = self._get_tids_from_tags(tags2, which='all')
 
-        self._compress_between_tids(
+        s = self._compress_between_tids(
             tid1, tid2,
             max_bond=max_bond,
             cutoff=cutoff,
@@ -5789,7 +5823,11 @@ class TensorNetwork(object):
             canonize_distance=canonize_distance,
             canonize_opts=canonize_opts,
             equalize_norms=equalize_norms,
+            return_s=return_s,
             **compress_opts)
+
+        if return_s:
+            return s
 
     def compress_all(self, inplace=False, **compress_opts):
         """Inplace compress all bonds in this network.

@@ -174,7 +174,7 @@ def _trim_and_renorm_svd_result(
         U = rdmul(U, s)
         VH = ldmul(s, VH)
 
-    return U, None, VH
+    return U, s, VH
 
 
 @compose
@@ -310,7 +310,7 @@ def _trim_and_renorm_svd_result_numba(
         U = rdmul_numba(U, s)
         VH = ldmul_numba(s, VH)
 
-    return U, None, VH
+    return U, s, VH
 
 
 @svd_truncated.register("numpy")
