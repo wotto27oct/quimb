@@ -515,7 +515,7 @@ def tensor_split(
         method, cutoff, absorb, max_bond, cutoff_mode, renorm)
 
     # ``s`` itself will be None unless ``absorb=None`` is specified
-    # NOTE: we changed this part to always return ``s`` even if ``absorb=None``
+    # NOTE: we changed this part to always return ``s`` even if ``absorb!=None``
     left, s, right = _SPLIT_FNS[method](array, **opts)
 
     if len(left_dims) != 1:
@@ -532,12 +532,19 @@ def tensor_split(
     ltags = T.tags | tags_to_oset(ltags)
     rtags = T.tags | tags_to_oset(rtags)
 
-    Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=ltags)
-    Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=rtags)
+    if absorb is None:
+        transpose_list = [len(left_inds)] + [i for i in range(len(left_inds))]
+        left = do("transpose", left, transpose_list)
+        Tl = Tensor(data=left, inds=(bond_ind[0], *left_inds), tags=ltags)
+        Tr = Tensor(data=right, inds=(bond_ind[1], *right_inds), tags=rtags)
+    else:
+        Tl = Tensor(data=left, inds=(*left_inds, bond_ind), tags=ltags)
+        Tr = Tensor(data=right, inds=(bond_ind, *right_inds), tags=rtags)
+
 
     if absorb is None:
         stags = T.tags | tags_to_oset(stags)
-        Ts = Tensor(data=s, inds=(bond_ind,), tags=stags)
+        Ts = Tensor(data=np.diag(s.astype(np.complex128)), inds=(bond_ind[0], bond_ind[1]), tags=stags)
         tensors = (Tl, Ts, Tr)
     else:
         tensors = (Tl, Tr)
@@ -5176,12 +5183,17 @@ class TensorNetwork(object):
                               max_bond=max_bond, cutoff_mode=cutoff_mode, 
                               renorm=renorm, ltags=ltags, rtags=rtags, bond_ind=bond_ind, return_s=return_s)
         if return_s:
-            (TL, TR), s = res
+            res, s = res
+            
+        if absorb is None:
+            TL, TS, TR = res
+            leave |= TL
+            leave |= TS
+            leave |= TR
         else:
             TL, TR = res
-
-        leave |= TL
-        leave |= TR
+            leave |= TL
+            leave |= TR
         if return_s:
             return leave, s
         return leave
